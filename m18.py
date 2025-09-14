@@ -9,11 +9,6 @@ import requests
 import serial
 from serial.tools import list_ports
 
-try:
-    import readline
-except ImportError:
-    pass
-
 data_matrix = [
     [0x00, 0x00, 0x02],
     [0x00, 0x02, 0x02],
@@ -56,7 +51,7 @@ data_matrix = [
 #   sn - serial number (2 bytes battery type, 3 bytes serial)
 #   adc_t - analog-to-digital converter temperature (mV of thermistor)
 #   dec_t - decimal temperature (byte_1 + byte_2/255)
-#   cell_v - cell voltages (1: 3568, 2: 3567, 3:3570, etc)
+#   cell_v - cell voltages (1: 3568, 2: 3567, 3:3570, etc.)
 
 
 data_id = [
@@ -285,7 +280,7 @@ class M18:
         self.PRINT_RX = self.PRINT_RX_SAVE
 
     def __init__(self, port):
-        if (port is None):
+        if port is None:
             print("*** NO PORT SPECIFIED ***")
             print("Available serial ports (choose one that says USB somewhere):")
             ports = list_ports.comports()
@@ -293,10 +288,10 @@ class M18:
             i = 1
             for p in ports:
                 print(f"  {i}: {p.device} - {p.manufacturer} - {p.description}")
-                i = i + 1
+                i += 1
 
             port_id = 0
-            while ((port_id < 1) or (port_id >= i)):
+            while (port_id < 1) or (port_id >= i):
                 user_port = input(f"Choose a port (1-{i - 1}): ")
                 try:
                     port_id = int(user_port)
@@ -351,10 +346,12 @@ class M18:
         next_index = (current_index + 1) % len(acc_values)
         self.ACC = acc_values[next_index]
 
-    def reverse_bits(self, byte):
+    @staticmethod
+    def reverse_bits(byte):
         return int(f"{byte:08b}"[::-1], 2)
 
-    def checksum(self, payload):
+    @staticmethod
+    def checksum(payload):
         checksum = 0
         for byte in payload:
             checksum += byte & 0xFFFF
@@ -471,16 +468,16 @@ class M18:
         self.idle()
         self.PRINT_RX = rx_debug
 
-    def try_cmd(self, cmd, msb, lsb, len, ret_len=0):
+    def try_cmd(self, cmd, msb, lsb, length, ret_len=0):
         # Turn off TX/RX printing, restore after printing
         self.txrx_save_and_set(False)
 
         # default is read 5 bytes more than payload (3-byte header, 2-byte cksum)
-        if (ret_len == 0):
-            ret_len = len + 5
+        if ret_len == 0:
+            ret_len = length + 5
 
         self.reset()
-        self.send_command(struct.pack('>BBBBBB', cmd, 0x04, 0x03, msb, lsb, len))
+        self.send_command(struct.pack('>BBBBBB', cmd, 0x04, 0x03, msb, lsb, length))
         data = self.read_response(ret_len)
         data_print = " ".join(f"{byte:02X}" for byte in data)
         print(f"Response from: 0x{(msb * 0x100 + lsb):04X}:", data_print)
@@ -491,10 +488,10 @@ class M18:
         self.send_command(struct.pack('>BBBBBB', command, 0x04, 0x03, a, b, c))
         return self.read_response(length)
 
-    def brute(self, a, b, len=0xFF, command=0x01):
+    def brute(self, a, b, length=0xFF, command=0x01):
         self.reset()
         try:
-            for i in range(len):
+            for i in range(length):
                 ret = self.cmd(a, b, i, i + 5, command)
                 if ret[0] == 0x81:
                     data_print = " ".join(f"{byte:02X}" for byte in ret)
@@ -504,7 +501,7 @@ class M18:
         finally:
             self.idle()
 
-    def full_brute(self, start=0, stop=0xFFFF, len=0xFF):
+    def full_brute(self, start=0, stop=0xFFFF, length=0xFF):
         """
         Perform a brute-force query across all register addresses.
 
@@ -519,8 +516,8 @@ class M18:
             for addr in range(start, stop):
                 msb = (addr >> 8) & 0xFF  # separate upper 8-bits of addr
                 lsb = addr & 0xFF  # separate lower 8-bits of addr
-                self.brute(msb, lsb, len, 0x01)
-                if ((addr % 256) == 0):
+                self.brute(msb, lsb, length, 0x01)
+                if (addr % 256) == 0:
                     print(f"addr = 0x{addr:04X} ", datetime.datetime.now())
         except KeyboardInterrupt:
             print("\nSimulation aborted by user. Exiting gracefully...")
@@ -558,29 +555,31 @@ class M18:
         time.sleep(duration)
         self.idle()
 
-    def calculate_temperature(self, adc_value):
+    @staticmethod
+    def calculate_temperature(adc_value):
         """
         Convert an ADC reading into a temperature estimate.
 
         The constants used here are only estimated.
         """
-        R1 = 10e3  # 10k ohm
-        R2 = 20e3  # 20k ohm
-        T1 = 50  # 50°C
-        T2 = 35  # 35°C
+        r1 = 10e3  # 10k ohm
+        r2 = 20e3  # 20k ohm
+        t1 = 50  # 50°C
+        t2 = 35  # 35°C
 
         adc1 = 0x0180
         adc2 = 0x022E
 
-        m = (T2 - T1) / (R2 - R1)
-        b = T1 - m * R1
+        m = (t2 - t1) / (r2 - r1)
+        b = t1 - m * r1
 
-        resistance = R1 + (adc_value - adc1) * (R2 - R1) / (adc2 - adc1)
+        resistance = r1 + (adc_value - adc1) * (r2 - r1) / (adc2 - adc1)
         temperature = m * resistance + b
 
         return round(temperature, 2)
 
-    def bytes2dt(self, time_bytes):
+    @staticmethod
+    def bytes2dt(time_bytes):
         epoch_time = int.from_bytes(time_bytes, 'big')
         dt = datetime.datetime.fromtimestamp(epoch_time, tz=datetime.UTC)
         return dt
@@ -601,7 +600,7 @@ class M18:
         except Exception as e:
             print(f"read_all: Failed with error: {e}")
 
-    def read_id(self, id_array=[], force_refresh=True, output="label"):
+    def read_id(self, id_array=None, force_refresh=True, output="label"):
         """
         Read data by ID. Default is print all
         # id_array - array of registers to print
@@ -613,7 +612,7 @@ class M18:
         #       "form" - returns array of [value]
         """
         # If empty, default is print all
-        if (len(id_array) == 0):
+        if not id_array or len(id_array) == 0:
             id_array = range(0, len(data_id))
 
         if not ((output == "label") or (output == "raw") or (output == "array") or (output == "form")):
@@ -625,22 +624,22 @@ class M18:
         try:
             self.reset()
 
-            if (force_refresh):
+            if force_refresh:
                 # Do dummy read to update 0x9000 data
                 for addr_h, addr_l, length in data_matrix:
-                    response = self.cmd(addr_h, addr_l, length, (length + 5))
+                    self.cmd(addr_h, addr_l, length, (length + 5))
                 self.idle()
                 time.sleep(0.1)
 
             # Add date to top
             now = datetime.datetime.now()
             formatted_time = now.strftime("%Y-%m-%d %H:%M:%S")
-            if (output == "label"):
+            if output == "label":
                 print(formatted_time)
                 print("ID  ADDR   LEN TYPE       LABEL                                   VALUE")
-            elif (output == "raw"):
+            elif output == "raw":
                 print(formatted_time)
-            elif (output == "form"):
+            elif output == "form":
                 array.append(formatted_time)
 
             self.reset()
@@ -649,7 +648,7 @@ class M18:
                 addr_h = (addr >> 8) & 0xFF  # separate upper 8-bits of addr
                 addr_l = addr & 0xFF  # separate lower 8-bits of addr
                 length = data_id[i][1]
-                type = data_id[i][2]
+                data_type = data_id[i][2]
                 label = data_id[i][3]
 
                 response = self.cmd(addr_h, addr_l, length, (length + 5))
@@ -657,9 +656,9 @@ class M18:
                     # extract payload. message without header and cksum
                     data = response[3:(3 + length)]
 
-                    # process data according to type
+                    # process data according to data_type
                     # (uint, date, ascii, sn, adc_t, dec_t, cell_v)
-                    match type:
+                    match data_type:
                         case "uint":
                             array_value = value = int.from_bytes(data, 'big')
                         case "date":
@@ -671,15 +670,15 @@ class M18:
                             hh, mm = divmod(mm, 60)
                             array_value = value = f"{hh}:{mm:02d}:{ss:02d}"
                         case "ascii":
-                            str = data.decode('utf-8')
-                            array_value = value = f'\"{str}\"'
+                            str_val = data.decode('utf-8')
+                            array_value = value = f'\"{str_val}\"'
                         case "sn":
                             btype = int.from_bytes(data[0:2], 'big')
-                            serial = int.from_bytes(data[2:5], 'big')
-                            if (output == "label" or output == "array"):
-                                array_value = value = f"Type: {btype:3d}, Serial: {serial:d}"
+                            serial_number = int.from_bytes(data[2:5], 'big')
+                            if output == "label" or output == "array":
+                                array_value = value = f"Type: {btype:3d}, Serial: {serial_number:d}"
                             else:
-                                value = f"{btype}\n{serial}"
+                                value = f"{btype}\n{serial_number}"
                         case "adc_t":
                             array_value = value = self.calculate_temperature(int.from_bytes(data, 'big'))
                         case "dec_t":
@@ -687,28 +686,28 @@ class M18:
                             array_value = value = f"{temp:.2f}"
                         case "cell_v":
                             array_value = cv = [int.from_bytes(data[i:i + 2], 'big') for i in range(0, 10, 2)]
-                            if (output == "label"):
+                            if output == "label":
                                 value = f"1: {cv[0]:4d}, 2: {cv[1]:4d}, 3: {cv[2]:4d}, 4: {cv[3]:4d}, 5: {cv[4]:4d}"
-                            elif (output == "raw"):
+                            elif output == "raw":
                                 value = f"{cv[0]:4d}\n{cv[1]:4d}\n{cv[2]:4d}\n{cv[3]:4d}\n{cv[4]:4d}"
 
                 else:
                     array_value = None
                     value = "------"
 
-                if (output == "label"):
+                if output == "label":
                     # Print formatted data
-                    print(f"{i:3d} 0x{addr:04X} {length:2d} {type:>6}   {label:<39} {value:<}")
-                elif (output == "raw"):
+                    print(f"{i:3d} 0x{addr:04X} {length:2d} {data_type:>6}   {label:<39} {value:<}")
+                elif output == "raw":
                     # Print spreadsheet format
                     print(value)
-                elif (output == "array"):
+                elif output == "array":
                     array.append([i, array_value])
-                elif (output == "form"):
+                elif output == "form":
                     # Print spreadsheet format
                     array.append(value)
 
-            if ((output == "array" or output == "form") and array):
+            if (output == "array" or output == "form") and array:
                 return array
 
             self.idle()
@@ -824,9 +823,9 @@ class M18:
             print("Pack voltage:", sum(array[4][1]) / 1000)
             print("Cell Voltages (mV):", array[4][1])
             print("Cell Imbalance (mV):", max(array[4][1]) - min(array[4][1]))
-            if (array[5][1]):
+            if array[5][1]:
                 print("Temperature (deg C):", array[5][1])
-            if (array[6][1]):
+            if array[6][1]:
                 print("Temperature (deg C):", array[6][1])
 
             print("\nCHARGING STATS:")
@@ -854,24 +853,17 @@ class M18:
 
             print("Total time on tool (>10A):", datetime.timedelta(seconds=tool_time))
 
-            for i, j in enumerate(range(19, 38)):
-                amp_range = f"{(i + 1) * 10}-{(i + 2) * 10}A"
+            for i, j in enumerate(range(19, 39)):
+                if j == 38:  # Do last label different
+                    amp_range = f"> 200A"
+                else:
+                    amp_range = f"{(i + 1) * 10}-{(i + 2) * 10}A"
                 label = f"Time @ {amp_range:>8}:"
                 t = array[j][1]
                 hhmmss = datetime.timedelta(seconds=t)
                 pct = round((t / tool_time) * 100)
                 bar = "X" * round(pct)
                 print(label, hhmmss, f"{pct:2d}%", bar)
-            # Do last label different
-            j += 1
-            amp_range = f"> 200A"
-            label = f"Time @ {amp_range:>8}:"
-            t = array[j][1]
-            hhmmss = datetime.timedelta(seconds=t)
-            pct = round((t / tool_time) * 100)
-            bar = "X" * round(pct)
-            print(label, hhmmss, f"{pct:2d}%", bar)
-
         except Exception as e:
             print(f"health: Failed with error: {e}")
             print("Check battery is connected and you have correct serial port")
@@ -886,7 +878,7 @@ class M18:
         print("Getting data from battery...")
         output = self.read_id(output="form")
 
-        if output == None:
+        if output is None:
             print("submit_form: No output returned, aborting")
         s_output = "\n".join(map(str, output))
 
@@ -896,7 +888,7 @@ class M18:
         date = input("Enter Date (example: 190316): ")
         serial_number = input("Enter Serial number (example: 0807426): ")
         sticker = input("Enter Sticker (example: 4932 4512 45): ")
-        type = input("Enter Type (example: M18B9): ")
+        battery_type = input("Enter Type (example: M18B9): ")
         capacity = input("Enter Capacity (example: 9.0Ah): ")
 
         form_data = {
@@ -914,7 +906,7 @@ class M18:
             "entry.337435885": sticker,
             # Type (M18B9) (required)
             #   Option: any text
-            "entry.1496274605": type,
+            "entry.1496274605": battery_type,
             # Capacity (9.0Ah) (required)
             #   Option: any text
             "entry.324224550": capacity,
@@ -932,7 +924,8 @@ class M18:
         else:
             print(f"submit_form: Failed to submit form. Status code: {response.status_code}")
 
-    def help(self):
+    @staticmethod
+    def help():
         print("Functions: \n \
             DIAGNOSTICS: \n \
             m.health() - print simple health report on battery \n \
@@ -946,7 +939,8 @@ class M18:
             \n \
             exit() - end program\n")
 
-    def adv_help(self):
+    @staticmethod
+    def adv_help():
         print("Advanced functions: \n \
             CHARGING SIMULATION: \n \
             m.simulate() - simulate charging comms \n \
@@ -976,7 +970,7 @@ class M18:
             m.keepalive() - send charge current request (0x62) \n")
 
 
-if __name__ == '__main__':
+def main():
     parser = argparse.ArgumentParser(
         description="M18 Protocol Interface",
         epilog="Connect UART-TX to M18-J2 and UART-RX to M18-J1 to fake the charger and UART-GND to M18-GND")
@@ -988,3 +982,7 @@ if __name__ == '__main__':
     m.help()
 
     code.InteractiveConsole(locals=locals()).interact('Entering shell...')
+
+
+if __name__ == '__main__':
+    main()
